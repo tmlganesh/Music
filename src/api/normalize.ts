@@ -61,8 +61,39 @@ const splitArtists = (names: string | undefined): ArtistMini[] => {
     }));
 };
 
+const splitCsv = (value: unknown): string[] => {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+};
+
+const splitArtistsWithIds = (
+  namesRaw: unknown,
+  idsRaw: unknown,
+  role: string
+): ArtistMini[] => {
+  const names = splitCsv(namesRaw);
+  const ids = splitCsv(idsRaw);
+
+  if (names.length === 0) return [];
+
+  return names.map((name, index) => ({
+    id: ids[index] || `artist-${name.toLowerCase().replace(/\s+/g, '-')}-${index}`,
+    name,
+    role,
+    type: 'artist',
+    image: [],
+    url: '',
+  }));
+};
+
 export const normalizeSong = (raw: any): Song => {
   const primaryFromObject = raw?.artists?.primary;
+  const primaryFromCsv = splitArtistsWithIds(raw?.primaryArtists, raw?.primaryArtistsId, 'primary_artists');
+  const featuredFromCsv = splitArtistsWithIds(raw?.featuredArtists, raw?.featuredArtistsId, 'featured_artists');
+
   const primaryArtists = Array.isArray(primaryFromObject)
     ? primaryFromObject.map((a: any) => ({
         id: String(a?.id ?? ''),
@@ -72,7 +103,40 @@ export const normalizeSong = (raw: any): Song => {
         image: normalizeImages(a?.image),
         url: String(a?.url ?? ''),
       }))
-    : splitArtists(raw?.primaryArtists);
+    : primaryFromCsv.length > 0
+      ? primaryFromCsv
+      : splitArtists(raw?.primaryArtists);
+
+  const featuredFromObject = Array.isArray(raw?.artists?.featured)
+    ? raw.artists.featured.map((a: any) => ({
+        id: String(a?.id ?? ''),
+        name: String(a?.name ?? 'Unknown Artist'),
+        role: String(a?.role ?? ''),
+        type: String(a?.type ?? 'artist'),
+        image: normalizeImages(a?.image),
+        url: String(a?.url ?? ''),
+      }))
+    : featuredFromCsv;
+
+  const allFromObject = Array.isArray(raw?.artists?.all)
+    ? raw.artists.all.map((a: any) => ({
+        id: String(a?.id ?? ''),
+        name: String(a?.name ?? 'Unknown Artist'),
+        role: String(a?.role ?? ''),
+        type: String(a?.type ?? 'artist'),
+        image: normalizeImages(a?.image),
+        url: String(a?.url ?? ''),
+      }))
+    : [];
+
+  const mergedAllArtists =
+    allFromObject.length > 0
+      ? allFromObject
+      : [...primaryArtists, ...featuredFromObject].filter(
+          (artist, index, self) =>
+            self.findIndex((candidate) => candidate.id === artist.id && candidate.name === artist.name) ===
+            index
+        );
 
   return {
     id: String(raw?.id ?? ''),
@@ -96,26 +160,8 @@ export const normalizeSong = (raw: any): Song => {
     },
     artists: {
       primary: primaryArtists,
-      featured: Array.isArray(raw?.artists?.featured)
-        ? raw.artists.featured.map((a: any) => ({
-            id: String(a?.id ?? ''),
-            name: String(a?.name ?? 'Unknown Artist'),
-            role: String(a?.role ?? ''),
-            type: String(a?.type ?? 'artist'),
-            image: normalizeImages(a?.image),
-            url: String(a?.url ?? ''),
-          }))
-        : [],
-      all: Array.isArray(raw?.artists?.all)
-        ? raw.artists.all.map((a: any) => ({
-            id: String(a?.id ?? ''),
-            name: String(a?.name ?? 'Unknown Artist'),
-            role: String(a?.role ?? ''),
-            type: String(a?.type ?? 'artist'),
-            image: normalizeImages(a?.image),
-            url: String(a?.url ?? ''),
-          }))
-        : primaryArtists,
+      featured: featuredFromObject,
+      all: mergedAllArtists.length > 0 ? mergedAllArtists : primaryArtists,
     },
     image: normalizeImages(raw?.image),
     downloadUrl: normalizeDownloadUrls(raw?.downloadUrl),
@@ -143,13 +189,13 @@ export const normalizeAlbum = (raw: any): Album => ({
   artists: {
     primary: Array.isArray(raw?.artists?.primary)
       ? raw.artists.primary.map(normalizeArtistMini)
-      : splitArtists(raw?.primaryArtists),
+      : splitArtistsWithIds(raw?.primaryArtists, raw?.primaryArtistsId, 'primary_artists'),
     featured: Array.isArray(raw?.artists?.featured)
       ? raw.artists.featured.map(normalizeArtistMini)
       : [],
     all: Array.isArray(raw?.artists?.all)
       ? raw.artists.all.map(normalizeArtistMini)
-      : splitArtists(raw?.primaryArtists),
+      : splitArtistsWithIds(raw?.primaryArtists, raw?.primaryArtistsId, 'primary_artists'),
   },
   songCount: toNumberOrNull(raw?.songCount),
   url: String(raw?.url ?? ''),
